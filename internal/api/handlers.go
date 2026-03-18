@@ -2,7 +2,10 @@ package api
 
 import (
 	"encoding/base64"
+	"fmt"
 	"net/http"
+	"os"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -84,8 +87,40 @@ func (a *api) SignFile(ctx *gin.Context) {
 
 	spinStop, _ := a.gui.StartSpinner()
 
+	// decode input data
+	data, err := base64.StdEncoding.DecodeString(req.SigningFileStream)
+	if err != nil {
+		a.log.Err(err).Msg("Input data decoding failed")
+		a.abortWithError(ctx, http.StatusBadRequest, err)
+		return
+	}
+	req.SigningFileStream = "" // free mem
+
+	// prepare stamp image
+	stampText := []string{
+		cert.SerialNumber[len(cert.SerialNumber)-8:],
+		time.Now().Format("02.01.2006 15:04:05"),
+	}
+	stamp, err := a.crypto.MakeIRMSStamp(stampText, float64(req.XCoordinate), float64(req.YCoordinate))
+	if err != nil {
+		a.log.Err(err).Msg("Stamp image failed")
+		a.abortWithError(ctx, http.StatusInternalServerError, err)
+		return
+	}
+
+	// fill signature info
+	signInfo := &model.SignatureInfo{
+		Reason: req.Reason,
+	}
+	if req.Location != nil {
+		signInfo.Location = *req.Location
+	}
+	if req.ContactInfo != nil {
+		signInfo.ContactInfo = *req.ContactInfo
+	}
+
 	// sign document
-	data, err := a.crypto.SignPDF(&req, cert, pass)
+	data, err = a.crypto.SignPDF(data, stamp, signInfo, cert, pass)
 	if err != nil {
 		if spinStop != nil {
 			spinStop()
@@ -94,10 +129,20 @@ func (a *api) SignFile(ctx *gin.Context) {
 		a.abortWithError(ctx, http.StatusInternalServerError, err)
 		return
 	}
+
+	// save local copy of signed document
+	outputFile, err := os.Create(fmt.Sprintf("signed-%s.pdf", time.Now().Format("2006-01-02-150405")))
+	if err != nil {
+		a.log.Err(err).Msg("Signed file save failed")
+		a.abortWithError(ctx, http.StatusInternalServerError, err)
+		return
+	}
+	outputFile.Write(data)
+	outputFile.Close()
+
 	if spinStop != nil {
 		spinStop()
 	}
-
 	a.log.Info().Str("Thumbprint", req.SigningCertificateThumbprint).Msg("Document signed")
 
 	// return doc to portal

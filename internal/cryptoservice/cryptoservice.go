@@ -5,9 +5,7 @@ import (
 	"crypto"
 	"crypto/sha1"
 	"crypto/x509"
-	"encoding/base64"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/ThalesGroup/crypto11"
@@ -120,8 +118,8 @@ func (c *cryptoservice) ListHardwareCertificates() ([]*model.Certificate, error)
 	return certList, nil
 }
 
-// SignPDF signs requested pdf with given certificate and password
-func (c *cryptoservice) SignPDF(req *model.FieldSignRequest, cert *model.Certificate, password string) ([]byte, error) {
+// SignCustomPDF
+func (c *cryptoservice) SignPDF(data []byte, stamp *model.StampImage, signInfo *model.SignatureInfo, cert *model.Certificate, password string) ([]byte, error) {
 	// find signer
 	signer, tokenCtx, err := c.getSigner(cert, password)
 	if err != nil {
@@ -129,13 +127,7 @@ func (c *cryptoservice) SignPDF(req *model.FieldSignRequest, cert *model.Certifi
 	}
 	defer tokenCtx.Close()
 
-	// prepare input data
-	data, err := base64.StdEncoding.DecodeString(req.SigningFileStream)
-	if err != nil {
-		return nil, err
-	}
-	req.SigningFileStream = "" // free mem
-
+	// input data reader
 	bytesReader := bytes.NewReader(data)
 	pdfReader, err := pdf.NewReader(bytesReader, int64(len(data)))
 	if err != nil {
@@ -145,43 +137,23 @@ func (c *cryptoservice) SignPDF(req *model.FieldSignRequest, cert *model.Certifi
 	// output buffer
 	var bytesWriter bytes.Buffer
 
-	// prepare stamp image
-	stampImg, err := c.makeStampImage([]string{
-		cert.SerialNumber[len(cert.SerialNumber)-8:],
-		time.Now().Format("02.01.2006 15:04:05"),
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// fill signature info
-	info := sign.SignDataSignatureInfo{
-		Date: time.Now().Local(),
-	}
-	if req.Location != nil {
-		info.Location = *req.Location
-	}
-	if req.ContactInfo != nil {
-		info.ContactInfo = *req.ContactInfo
-	}
-	if req.Reason != "" {
-		info.Reason = req.Reason
-	}
+	// force current time
+	signInfo.Date = time.Now().Local()
 
 	// sign
 	err = sign.Sign(bytesReader, &bytesWriter, pdfReader, int64(len(data)), sign.SignData{
 		Signature: sign.SignDataSignature{
-			Info:       info,
+			Info:       sign.SignDataSignatureInfo(*signInfo),
 			CertType:   sign.ApprovalSignature,
 			DocMDPPerm: sign.AllowFillingExistingFormFieldsAndSignaturesPerms,
 		},
 		Appearance: sign.Appearance{
 			Visible:          true,
-			LowerLeftX:       float64(req.XCoordinate),
-			LowerLeftY:       float64(req.YCoordinate),
-			UpperRightX:      float64(req.XCoordinate + 150),
-			UpperRightY:      float64(req.YCoordinate + 50),
-			Image:            stampImg,
+			LowerLeftX:       stamp.LowerLeftX,
+			LowerLeftY:       stamp.LowerLeftY,
+			UpperRightX:      stamp.UpperRightX,
+			UpperRightY:      stamp.UpperRightY,
+			Image:            stamp.Image,
 			ImageAsWatermark: false, // draw text over image
 		},
 		Signer:          signer,
@@ -191,14 +163,6 @@ func (c *cryptoservice) SignPDF(req *model.FieldSignRequest, cert *model.Certifi
 	if err != nil {
 		return nil, err
 	}
-
-	// save local copy of signed document
-	outputFile, err := os.Create(fmt.Sprintf("signed-%s.pdf", time.Now().Format("2006-01-02-150405")))
-	if err != nil {
-		return nil, err
-	}
-	outputFile.Write(bytesWriter.Bytes())
-	outputFile.Close()
 
 	return bytesWriter.Bytes(), nil
 }
@@ -233,7 +197,7 @@ func (c *cryptoservice) getSigner(cert *model.Certificate, password string) (cry
 	return signer, tokenCtx, err
 }
 
-func (c *cryptoservice) makeStampImage(text []string) ([]byte, error) {
+func (c *cryptoservice) MakeIRMSStamp(text []string, x, y float64) (*model.StampImage, error) {
 	signatureImage, err := gg.LoadImage(c.cfg.StampBg)
 	if err != nil {
 		return nil, err
@@ -246,12 +210,13 @@ func (c *cryptoservice) makeStampImage(text []string) ([]byte, error) {
 		return nil, err
 	}
 
-	x := 85.0
-	y := 75.0
+	lineX := 85.0
+	lineY := 75.0
+	lineYDelta := 18.0
 
-	for i, s := range text {
-		lineY := y + float64(i*18)
-		dc.DrawStringAnchored(s, x, lineY, 0, 0)
+	for _, s := range text {
+		dc.DrawStringAnchored(s, lineX, lineY, 0, 0)
+		lineY += lineYDelta
 	}
 
 	var imgWriter bytes.Buffer
@@ -259,5 +224,40 @@ func (c *cryptoservice) makeStampImage(text []string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return imgWriter.Bytes(), nil
+
+	res := model.StampImage{
+		Image:       imgWriter.Bytes(),
+		LowerLeftX:  x,
+		LowerLeftY:  y,
+		UpperRightX: x + float64(dc.Width())/2,
+		UpperRightY: y + float64(dc.Height())/2,
+	}
+	return &res, nil
+}
+
+func (c *cryptoservice) MakeCustomStamp(stamp *model.StampImage, text []string, fontSize float64) error {
+	dc := gg.NewContext(int(stamp.UpperRightX-stamp.LowerLeftX), int(stamp.UpperRightY-stamp.LowerLeftY))
+	dc.SetRGB(0, 0, 0)
+
+	if err := dc.LoadFontFace(c.cfg.Font, float64(fontSize)); err != nil {
+		return err
+	}
+
+	lineX := 20.0
+	lineY := 100.0
+	lineYDelta := dc.FontHeight()
+
+	for _, s := range text {
+		dc.DrawStringAnchored(s, lineX, lineY, 0, 0)
+		lineY += lineYDelta
+	}
+
+	var imgWriter bytes.Buffer
+	err := dc.EncodePNG(&imgWriter)
+	if err != nil {
+		return err
+	}
+
+	stamp.Image = imgWriter.Bytes()
+	return nil
 }

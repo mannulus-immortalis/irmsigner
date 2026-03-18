@@ -3,11 +3,15 @@ package model
 import (
 	"crypto/x509"
 	"time"
+
+	"github.com/digitorus/pdfsign/sign"
 )
 
 type CryptoService interface {
 	ListHardwareCertificates() ([]*Certificate, error)
-	SignPDF(req *FieldSignRequest, cert *Certificate, password string) ([]byte, error)
+	MakeIRMSStamp(text []string, x, y float64) (*StampImage, error)
+	MakeCustomStamp(stamp *StampImage, text []string, fontSize float64) error
+	SignPDF(data []byte, stamp *StampImage, signInfo *SignatureInfo, cert *Certificate, password string) ([]byte, error)
 }
 
 type Certificate struct {
@@ -19,3 +23,13 @@ type Certificate struct {
 	SlotId       uint
 	ObjId        []byte
 }
+
+type StampImage struct {
+	Image       []byte
+	LowerLeftX  float64
+	LowerLeftY  float64
+	UpperRightX float64
+	UpperRightY float64
+}
+
+type SignatureInfo sign.SignDataSignatureInfo
