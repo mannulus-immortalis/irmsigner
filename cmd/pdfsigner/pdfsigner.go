@@ -130,17 +130,17 @@ func main() {
 		return
 	}
 
+	x, y := 350.0, 50.0
+	w, h := 410.0, 110.0
+	lineSpacing, fontSize := 32.0, 28.0
+
 	// prepare stamp image
-	stamp := &model.StampImage{
-		LowerLeftX:  100,
-		LowerLeftY:  0,
-		UpperRightX: 800,
-		UpperRightY: 300,
-	}
-	err = crypto.MakeCustomStamp(stamp, []string{
-		// stamp text
+	stamp, err := crypto.MakeCustomStamp([]string{
+		"Digitally signed by",
 		cert.IssuedTo,
-	}, 14)
+		time.Now().Format("2006-01-02 15:04:05Z07:00"),
+	},
+		x, y, w, h, lineSpacing, fontSize)
 	if err != nil {
 		log.Error().Msg("MakeCustomStamp failed")
 		return

@@ -10,7 +10,7 @@ import (
 type CryptoService interface {
 	ListHardwareCertificates() ([]*Certificate, error)
 	MakeIRMSStamp(text []string, x, y float64) (*StampImage, error)
-	MakeCustomStamp(stamp *StampImage, text []string, fontSize float64) error
+	MakeCustomStamp(text []string, x, y, w, h, lineStep, fontSize float64) (*StampImage, error)
 	SignPDF(data []byte, stamp *StampImage, signInfo *SignatureInfo, cert *Certificate, password string) ([]byte, error)
 }
 

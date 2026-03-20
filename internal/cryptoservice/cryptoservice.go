@@ -202,62 +202,42 @@ func (c *cryptoservice) MakeIRMSStamp(text []string, x, y float64) (*model.Stamp
 	if err != nil {
 		return nil, err
 	}
-
 	dc := gg.NewContextForImage(signatureImage)
+	return c.makeStamp(dc, text, x, y, 85, 62, 18, 14)
+}
+
+func (c *cryptoservice) MakeCustomStamp(text []string, x, y, w, h, lineStep, fontSize float64) (*model.StampImage, error) {
+	dc := gg.NewContext(int(w), int(h))
+	dc.SetRGB(0.8, 1, 0.8)
+	dc.DrawRoundedRectangle(1, 1, w-2, h-2, 15)
+	dc.Fill()
+	return c.makeStamp(dc, text, x, y, 10, 10, lineStep, fontSize)
+}
+
+func (c *cryptoservice) makeStamp(dc *gg.Context, text []string, x, y, textX, textY, lineStep, fontSize float64) (*model.StampImage, error) {
 	dc.SetRGB(0, 0, 0)
 
-	if err := dc.LoadFontFace(c.cfg.Font, float64(c.cfg.FontSize)); err != nil {
+	if err := dc.LoadFontFace(c.cfg.Font, float64(fontSize)); err != nil {
 		return nil, err
 	}
 
-	lineX := 85.0
-	lineY := 75.0
-	lineYDelta := 18.0
-
 	for _, s := range text {
-		dc.DrawStringAnchored(s, lineX, lineY, 0, 0)
-		lineY += lineYDelta
+		dc.DrawStringAnchored(s, textX, textY, 0, 1)
+		textY += lineStep
 	}
 
 	var imgWriter bytes.Buffer
-	err = dc.EncodePNG(&imgWriter)
+	err := dc.EncodePNG(&imgWriter)
 	if err != nil {
 		return nil, err
 	}
 
-	res := model.StampImage{
+	stamp := model.StampImage{
 		Image:       imgWriter.Bytes(),
 		LowerLeftX:  x,
 		LowerLeftY:  y,
 		UpperRightX: x + float64(dc.Width())/2,
 		UpperRightY: y + float64(dc.Height())/2,
 	}
-	return &res, nil
-}
-
-func (c *cryptoservice) MakeCustomStamp(stamp *model.StampImage, text []string, fontSize float64) error {
-	dc := gg.NewContext(int(stamp.UpperRightX-stamp.LowerLeftX), int(stamp.UpperRightY-stamp.LowerLeftY))
-	dc.SetRGB(0, 0, 0)
-
-	if err := dc.LoadFontFace(c.cfg.Font, float64(fontSize)); err != nil {
-		return err
-	}
-
-	lineX := 20.0
-	lineY := 100.0
-	lineYDelta := dc.FontHeight()
-
-	for _, s := range text {
-		dc.DrawStringAnchored(s, lineX, lineY, 0, 0)
-		lineY += lineYDelta
-	}
-
-	var imgWriter bytes.Buffer
-	err := dc.EncodePNG(&imgWriter)
-	if err != nil {
-		return err
-	}
-
-	stamp.Image = imgWriter.Bytes()
-	return nil
+	return &stamp, nil
 }
