@@ -52,6 +52,8 @@ func (a *api) Run(addr string) error {
 
 	_, _ = a.updateCertList()
 
+	a.gui.OnFileDrop(a.SignCustomFile)
+
 	return a.srv.ListenAndServe()
 }
 

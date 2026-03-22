@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -86,6 +87,11 @@ func (a *api) SignFile(ctx *gin.Context) {
 	}
 
 	spinStop, _ := a.gui.StartSpinner()
+	defer func() {
+		if spinStop != nil {
+			spinStop()
+		}
+	}()
 
 	// decode input data
 	data, err := base64.StdEncoding.DecodeString(req.SigningFileStream)
@@ -122,16 +128,13 @@ func (a *api) SignFile(ctx *gin.Context) {
 	// sign document
 	data, err = a.crypto.SignPDF(data, stamp, signInfo, cert, pass)
 	if err != nil {
-		if spinStop != nil {
-			spinStop()
-		}
 		a.log.Err(err).Msg("Sign failed")
 		a.abortWithError(ctx, http.StatusInternalServerError, err)
 		return
 	}
 
 	// save local copy of signed document
-	outputFile, err := os.Create(fmt.Sprintf("signed-%s.pdf", time.Now().Format("2006-01-02-150405")))
+	outputFile, err := os.Create(fmt.Sprintf("irms-signed-%s.pdf", time.Now().Format("2006-01-02-150405")))
 	if err != nil {
 		a.log.Err(err).Msg("Signed file save failed")
 		a.abortWithError(ctx, http.StatusInternalServerError, err)
@@ -140,9 +143,6 @@ func (a *api) SignFile(ctx *gin.Context) {
 	outputFile.Write(data)
 	outputFile.Close()
 
-	if spinStop != nil {
-		spinStop()
-	}
 	a.log.Info().Str("Thumbprint", req.SigningCertificateThumbprint).Msg("Document signed")
 
 	// return doc to portal
@@ -151,4 +151,119 @@ func (a *api) SignFile(ctx *gin.Context) {
 		SignedFileStream: &str,
 	}
 	ctx.JSON(http.StatusCreated, resp)
+}
+
+// SignCustomFile signs any PDF file dropped into the app window
+func (a *api) SignCustomFile(inputFilename, certSerial string) {
+	inputFilename = strings.TrimSpace(inputFilename)
+	inputFilename = strings.TrimPrefix(inputFilename, "file://")
+
+	a.log.Info().Str("Filename", inputFilename).Str("CertSerial", certSerial).Msg("PDF file dropped into the window")
+
+	// select certificate
+	certs, err := a.crypto.ListHardwareCertificates()
+	if err != nil {
+		a.log.Err(err).Msg("Cert list failed")
+		return
+	}
+
+	var cert *model.Certificate
+	certSerial = strings.ToLower(certSerial)
+	for i := range certs {
+		if strings.ToLower(certs[i].SerialNumber) == certSerial {
+			cert = certs[i]
+			break
+		}
+	}
+	if cert == nil {
+		a.log.Error().Msg("Can't find certificate given by -sn or -thumb option")
+		return
+	}
+
+	// read input file
+	data, err := os.ReadFile(inputFilename)
+	if err != nil {
+		a.log.Error().Str("in", inputFilename).Msg("Can't read input file, please specify it with -in option")
+		return
+	}
+
+	// make unique output file name
+	var outputFilename, fileName, fileExt string
+	dotPos := strings.LastIndex(inputFilename, ".")
+	if dotPos < 0 {
+		fileName = inputFilename
+	} else {
+		fileName = inputFilename[:dotPos]
+		fileExt = inputFilename[dotPos:]
+	}
+	n := 0
+	for n < 100 {
+		f := fileName + ".signed." + time.Now().Format("2006-01-02-150405")
+		if n > 0 {
+			f += fmt.Sprintf("-%d", n)
+		}
+		f += fileExt
+		_, err := os.Stat(f)
+		if err != nil && os.IsNotExist(err) { // found unused name
+			outputFilename = f
+			break
+		}
+		n++
+	}
+	if outputFilename == "" {
+		a.log.Error().Msg("Can't make unique output file name, please specify it manually with -out option")
+		return
+	}
+
+	// request password from user
+	a.log.Info().Str("out", outputFilename).Msg("Requesting pass")
+	pass := a.gui.RequestPass("[" + cert.SerialNumber + "] " + cert.X509Cert.Subject.CommonName)
+	if pass == "" {
+		a.log.Error().Msg("Password is missing")
+		return
+	}
+
+	spinStop, _ := a.gui.StartSpinner()
+
+	defer func() {
+		if spinStop != nil {
+			spinStop()
+		}
+	}()
+
+	x, y := 350.0, 50.0
+	w, h := 410.0, 110.0
+	lineSpacing, fontSize := 32.0, 28.0
+
+	// prepare stamp image
+	stamp, err := a.crypto.MakeCustomStamp([]string{
+		"Digitally signed by",
+		cert.IssuedTo,
+		time.Now().Format("2006-01-02 15:04:05Z07:00"),
+	},
+		x, y, w, h, lineSpacing, fontSize)
+	if err != nil {
+		a.log.Error().Msg("MakeCustomStamp failed")
+		return
+	}
+
+	signInfo := &model.SignatureInfo{
+		Name: cert.IssuedTo,
+	}
+	signed, err := a.crypto.SignPDF(data, stamp, signInfo, cert, pass)
+	if err != nil {
+		a.log.Err(err).Msg("SignCustomPDF failed")
+		return
+	}
+
+	a.log.Info().Str("out", outputFilename).Msg("Saving PDF...")
+	outputFile, err := os.Create(outputFilename)
+	if err != nil {
+		a.log.Err(err).Str("out", outputFilename).Msg("File save failed")
+		return
+	}
+	outputFile.Write(signed)
+	outputFile.Close()
+
+	a.log.Info().Str("out", outputFilename).Msg("PDF signed successfully!")
 }

@@ -20,11 +20,12 @@ const (
 )
 
 type gui struct {
-	cfg       *model.Config
-	mainWin   *gtk.Window
-	listStore *gtk.ListStore
-	closeChan chan bool
-	icon      *gdk.Pixbuf
+	cfg        *model.Config
+	mainWin    *gtk.Window
+	listStore  *gtk.ListStore
+	closeChan  chan bool
+	icon       *gdk.Pixbuf
+	onFileDrop model.FileDropFunc
 }
 
 func New(cfg *model.Config, closeChan chan bool) (*gui, error) {
@@ -46,6 +47,10 @@ func New(cfg *model.Config, closeChan chan bool) (*gui, error) {
 	}
 
 	return g, nil
+}
+
+func (g *gui) OnFileDrop(f model.FileDropFunc) {
+	g.onFileDrop = f
 }
 
 func (g *gui) UpdateList(list []*model.Certificate) {
@@ -131,7 +136,7 @@ Please enter password for certificate:
 
 	win.SetModal(true)
 	win.SetDefaultSize(250, 100)
-	win.SetTitle("IRMSigner")
+	win.SetTitle("IRMSigner password")
 	win.ShowAll()
 
 	return <-passChan
@@ -169,7 +174,7 @@ func (g *gui) StartSpinner() (func(), error) {
 
 	win.SetModal(true)
 	win.SetDefaultSize(250, 100)
-	win.SetTitle("IRMSigner")
+	win.SetTitle("IRMSigner Wait...")
 	win.ShowAll()
 
 	spinner.Start()
@@ -201,7 +206,8 @@ func (g *gui) start() error {
 	})
 
 	label, _ := gtk.LabelNew(`This application signs documents from IRMS portal with your certificate.
-You will be asked for a password when IRMS portal requests signature.`)
+You will be asked for a password when IRMS portal requests signature.
+If you want to sign a PDF file manually, select certificate and drop file in this window.`)
 	label.SetHExpand(true)
 	label.SetHAlign(gtk.ALIGN_START)
 
@@ -241,9 +247,48 @@ You will be asked for a password when IRMS portal requests signature.`)
 	grid.Attach(minBtn, 1, 2, 1, 1)
 	grid.Attach(closeBtn, 2, 2, 1, 1)
 
+	// file drop
+	t_uri, _ := gtk.TargetEntryNew("text/uri-list", gtk.TARGET_OTHER_APP, 0)
+	grid.DragDestSet(gtk.DEST_DEFAULT_ALL, []gtk.TargetEntry{*t_uri}, gdk.ACTION_COPY)
+	grid.Connect("drag-data-received", func(l *gtk.Grid, ctx *gdk.DragContext, x int, y int, data *gtk.SelectionData, info uint, time uint) {
+		if g.onFileDrop != nil {
+			certSerial := ""
+
+			sel, err := treeView.GetSelection()
+			if err != nil {
+				log.Printf("GetSelection failed: %w", err)
+				return
+			}
+			if sel.CountSelectedRows() != 1 {
+				log.Printf("Unexpected selected rows count: %d", sel.CountSelectedRows())
+				return
+			}
+
+			_, treeiter, ok := sel.GetSelected()
+			if !ok || treeiter == nil {
+				log.Printf("GetSelected failed")
+				return
+			}
+
+			val, err := listStore.GetValue(treeiter, 0)
+			if err != nil {
+				log.Printf("GetValue failed: %w", err)
+				return
+			}
+
+			certSerial, err = val.GetString()
+			if err != nil {
+				log.Printf("GetString failed: %w", err)
+				return
+			}
+
+			go g.onFileDrop(string(data.GetData()), certSerial)
+		}
+	})
+
 	win.Add(grid)
 	win.ShowAll()
-	win.Iconify()
+	// win.Iconify()
 	go gtk.Main()
 	return nil
 }
