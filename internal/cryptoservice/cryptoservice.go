@@ -206,7 +206,27 @@ func (c *cryptoservice) MakeIRMSStamp(text []string, x, y float64) (*model.Stamp
 	return c.makeStamp(dc, text, x, y, 85, 62, 18, 14)
 }
 
-func (c *cryptoservice) MakeCustomStamp(text []string, x, y, w, h, lineStep, fontSize float64) (*model.StampImage, error) {
+func (c *cryptoservice) MakeCustomStamp(text []string) (*model.StampImage, error) {
+	x, y := 350.0, 50.0
+	w, h := 370.0, 110.0
+	lineStep, fontSize := 32.0, 28.0
+
+	tmpdc := gg.NewContext(int(w), int(h))
+	if err := tmpdc.LoadFontFace(c.cfg.Font, float64(fontSize)); err != nil {
+		return nil, err
+	}
+	max := w
+	for _, t := range text {
+		nw, _ := tmpdc.MeasureString(t)
+		fmt.Printf("%s => %0.1f\n", t, nw)
+		if nw > max {
+			max = nw
+		}
+	}
+	d := max-w+20
+	w += d
+	x -= d/2
+
 	dc := gg.NewContext(int(w), int(h))
 	dc.SetRGB(0.8, 1, 0.8)
 	dc.DrawRoundedRectangle(1, 1, w-2, h-2, 15)
