@@ -223,9 +223,9 @@ func (c *cryptoservice) MakeCustomStamp(text []string) (*model.StampImage, error
 			max = nw
 		}
 	}
-	d := max-w+20
+	d := max - w + 20
 	w += d
-	x -= d/2
+	x -= d / 2
 
 	dc := gg.NewContext(int(w), int(h))
 	dc.SetRGB(0.8, 1, 0.8)

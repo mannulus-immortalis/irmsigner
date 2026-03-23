@@ -154,17 +154,14 @@ func (a *api) SignFile(ctx *gin.Context) {
 }
 
 // SignCustomFile signs any PDF file dropped into the app window
-func (a *api) SignCustomFile(inputFilename, certSerial string) {
-	inputFilename = strings.TrimSpace(inputFilename)
-	inputFilename = strings.TrimPrefix(inputFilename, "file://")
-
+func (a *api) SignCustomFile(inputFilename, certSerial string) error {
 	a.log.Info().Str("Filename", inputFilename).Str("CertSerial", certSerial).Msg("PDF file dropped into the window")
 
 	// select certificate
 	certs, err := a.crypto.ListHardwareCertificates()
 	if err != nil {
 		a.log.Err(err).Msg("Cert list failed")
-		return
+		return err
 	}
 
 	var cert *model.Certificate
@@ -177,14 +174,14 @@ func (a *api) SignCustomFile(inputFilename, certSerial string) {
 	}
 	if cert == nil {
 		a.log.Error().Msg("Can't find certificate given by -sn or -thumb option")
-		return
+		return err
 	}
 
 	// read input file
 	data, err := os.ReadFile(inputFilename)
 	if err != nil {
 		a.log.Error().Str("in", inputFilename).Msg("Can't read input file, please specify it with -in option")
-		return
+		return err
 	}
 
 	// make unique output file name
@@ -212,7 +209,7 @@ func (a *api) SignCustomFile(inputFilename, certSerial string) {
 	}
 	if outputFilename == "" {
 		a.log.Error().Msg("Can't make unique output file name, please specify it manually with -out option")
-		return
+		return model.ErrNotFound
 	}
 
 	// request password from user
@@ -220,7 +217,7 @@ func (a *api) SignCustomFile(inputFilename, certSerial string) {
 	pass := a.gui.RequestPass("[" + cert.SerialNumber + "] " + cert.X509Cert.Subject.CommonName)
 	if pass == "" {
 		a.log.Error().Msg("Password is missing")
-		return
+		return model.ErrPasswordRequired
 	}
 
 	spinStop, _ := a.gui.StartSpinner()
@@ -239,7 +236,7 @@ func (a *api) SignCustomFile(inputFilename, certSerial string) {
 	})
 	if err != nil {
 		a.log.Error().Msg("MakeCustomStamp failed")
-		return
+		return err
 	}
 
 	signInfo := &model.SignatureInfo{
@@ -248,17 +245,18 @@ func (a *api) SignCustomFile(inputFilename, certSerial string) {
 	signed, err := a.crypto.SignPDF(data, stamp, signInfo, cert, pass)
 	if err != nil {
 		a.log.Err(err).Msg("SignCustomPDF failed")
-		return
+		return err
 	}
 
 	a.log.Info().Str("out", outputFilename).Msg("Saving PDF...")
 	outputFile, err := os.Create(outputFilename)
 	if err != nil {
 		a.log.Err(err).Str("out", outputFilename).Msg("File save failed")
-		return
+		return err
 	}
 	outputFile.Write(signed)
 	outputFile.Close()
 
 	a.log.Info().Str("out", outputFilename).Msg("PDF signed successfully!")
+	return nil
 }

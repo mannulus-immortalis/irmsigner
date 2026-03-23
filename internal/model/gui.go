@@ -1,12 +1,13 @@
 package model
 
-type FileDropFunc func(filename, certSerial string)
+type FileDropFunc func(filename, certSerial string) error
 
 type GUI interface {
 	UpdateList(list []*Certificate)
 	RequestPass(certTitle string) string
 	OnFileDrop(f FileDropFunc)
 	StartSpinner() (func(), error)
+	ShowMessage(text, status string) error
 	Stop()
 }
 

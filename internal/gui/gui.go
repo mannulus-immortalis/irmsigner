@@ -3,6 +3,8 @@ package gui
 import (
 	"encoding/base64"
 	"log"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/gotk3/gotk3/gdk"
@@ -17,6 +19,8 @@ const (
 	COLUMN_THUMB
 	COLUMN_SUBJ
 	COLUMN_TILL
+
+	fileLabelDefaultText = `No PDF file selected. Drag and drop file into this window to sign.`
 )
 
 type gui struct {
@@ -25,7 +29,10 @@ type gui struct {
 	listStore  *gtk.ListStore
 	closeChan  chan bool
 	icon       *gdk.Pixbuf
-	onFileDrop model.FileDropFunc
+	onFileSign model.FileDropFunc
+
+	fileName   string
+	certSerial string
 }
 
 func New(cfg *model.Config, closeChan chan bool) (*gui, error) {
@@ -50,7 +57,7 @@ func New(cfg *model.Config, closeChan chan bool) (*gui, error) {
 }
 
 func (g *gui) OnFileDrop(f model.FileDropFunc) {
-	g.onFileDrop = f
+	g.onFileSign = f
 }
 
 func (g *gui) UpdateList(list []*model.Certificate) {
@@ -58,9 +65,9 @@ func (g *gui) UpdateList(list []*model.Certificate) {
 	time.Sleep(100 * time.Millisecond)
 	if len(list) == 0 {
 		_ = g.addRow([]interface{}{
-			"!!!",
+			"",
 			"Please attach your cryptographic device",
-			"!!!",
+			"",
 			"",
 		})
 		return
@@ -185,6 +192,47 @@ func (g *gui) StartSpinner() (func(), error) {
 	}, nil
 }
 
+func (g *gui) ShowMessage(text, status string) error {
+	win, err := gtk.WindowNew(gtk.WINDOW_TOPLEVEL)
+	if err != nil {
+		return err
+	}
+	win.SetIcon(g.icon)
+
+	label, _ := gtk.LabelNew(text)
+	label.SetHExpand(true)
+	label.SetHAlign(gtk.ALIGN_START)
+
+	closeBtn, _ := gtk.ButtonNewWithLabel("OK")
+	closeBtn.Connect("clicked", func() {
+		win.Close()
+	})
+
+	img, err := gtk.ImageNewFromPixbuf(g.icon)
+	if err != nil {
+		return err
+	}
+	grid, _ := gtk.GridNew()
+	grid.SetBorderWidth(10)
+	grid.SetColumnSpacing(10)
+	grid.SetRowSpacing(10)
+	grid.SetHExpand(true)
+	grid.SetVExpand(true)
+	grid.SetOrientation(gtk.ORIENTATION_VERTICAL)
+	grid.Attach(img, 0, 0, 1, 2)
+	grid.Attach(label, 1, 0, 1, 1)
+	grid.Attach(closeBtn, 1, 1, 1, 1)
+
+	win.Add(grid)
+
+	win.SetModal(true)
+	win.SetDefaultSize(250, 100)
+	win.SetTitle("IRMSigner " + status)
+	win.ShowAll()
+
+	return nil
+}
+
 func (g *gui) Stop() {
 	gtk.MainQuit()
 }
@@ -206,20 +254,12 @@ func (g *gui) start() error {
 	})
 
 	label, _ := gtk.LabelNew(`This application signs documents from IRMS portal with your certificate.
-You will be asked for a password when IRMS portal requests signature.
-If you want to sign a PDF file manually, select certificate and drop file in this window.`)
+You will be asked for a password when IRMS portal requests signature.`)
 	label.SetHExpand(true)
 	label.SetHAlign(gtk.ALIGN_START)
 
-	minBtn, _ := gtk.ButtonNewWithLabel("Hide window")
-	minBtn.Connect("clicked", func() {
-		win.Iconify()
-	})
-
-	closeBtn, _ := gtk.ButtonNewWithLabel("Close application")
-	closeBtn.Connect("clicked", func() {
-		win.Close()
-	})
+	signBtn, _ := gtk.ButtonNewWithLabel("Sign file")
+	signBtn.SetSensitive(false)
 
 	treeView, listStore, err := setupTreeView()
 	if err != nil {
@@ -234,6 +274,9 @@ If you want to sign a PDF file manually, select certificate and drop file in thi
 		return err
 	}
 
+	fileNameLabel, _ := gtk.LabelNew(fileLabelDefaultText)
+	fileNameLabel.SetHAlign(gtk.ALIGN_START)
+
 	grid, _ := gtk.GridNew()
 	grid.SetBorderWidth(10)
 	grid.SetColumnSpacing(10)
@@ -242,47 +285,91 @@ If you want to sign a PDF file manually, select certificate and drop file in thi
 	grid.SetVExpand(true)
 	grid.SetOrientation(gtk.ORIENTATION_VERTICAL)
 	grid.Attach(img, 0, 0, 1, 3)
-	grid.Attach(label, 1, 0, 2, 1)
-	grid.Attach(treeView, 1, 1, 2, 1)
-	grid.Attach(minBtn, 1, 2, 1, 1)
-	grid.Attach(closeBtn, 2, 2, 1, 1)
+	grid.Attach(label, 1, 0, 1, 1)
+	grid.Attach(treeView, 1, 1, 1, 1)
+	grid.Attach(fileNameLabel, 1, 2, 1, 1)
+	grid.Attach(signBtn, 1, 3, 1, 1)
 
 	// file drop
 	t_uri, _ := gtk.TargetEntryNew("text/uri-list", gtk.TARGET_OTHER_APP, 0)
 	grid.DragDestSet(gtk.DEST_DEFAULT_ALL, []gtk.TargetEntry{*t_uri}, gdk.ACTION_COPY)
 	grid.Connect("drag-data-received", func(l *gtk.Grid, ctx *gdk.DragContext, x int, y int, data *gtk.SelectionData, info uint, time uint) {
-		if g.onFileDrop != nil {
-			certSerial := ""
+		defer func() {
+			signBtn.SetSensitive(g.fileName != "" && g.certSerial != "")
+		}()
 
-			sel, err := treeView.GetSelection()
-			if err != nil {
-				log.Printf("GetSelection failed: %w", err)
-				return
-			}
-			if sel.CountSelectedRows() != 1 {
-				log.Printf("Unexpected selected rows count: %d", sel.CountSelectedRows())
-				return
-			}
+		fileName := string(data.GetData())
+		fileName = strings.TrimSpace(fileName)
+		fileName = strings.TrimPrefix(fileName, "file://")
+		_, err = os.Stat(fileName)
 
-			_, treeiter, ok := sel.GetSelected()
-			if !ok || treeiter == nil {
-				log.Printf("GetSelected failed")
-				return
-			}
+		if err == nil {
+			g.fileName = fileName
+		} else {
+			g.fileName = ""
+		}
 
-			val, err := listStore.GetValue(treeiter, 0)
-			if err != nil {
-				log.Printf("GetValue failed: %w", err)
-				return
-			}
+		if g.fileName == "" {
+			fileNameLabel.SetText(fileLabelDefaultText)
+			return
+		}
 
-			certSerial, err = val.GetString()
-			if err != nil {
-				log.Printf("GetString failed: %w", err)
-				return
-			}
+		fileNameLabel.SetText(g.fileName)
+	})
 
-			go g.onFileDrop(string(data.GetData()), certSerial)
+	// cert select
+	sel, err := treeView.GetSelection()
+	if err != nil {
+		log.Printf("GetSelection failed: %w", err)
+		return err
+	}
+	sel.Connect("changed", func() {
+		defer func() {
+			signBtn.SetSensitive(g.fileName != "" && g.certSerial != "")
+		}()
+
+		certSerial := ""
+
+		if sel.CountSelectedRows() != 1 {
+			// log.Printf("Unexpected selected rows count: %d", sel.CountSelectedRows())
+			return
+		}
+
+		_, treeiter, ok := sel.GetSelected()
+		if !ok || treeiter == nil {
+			log.Printf("GetSelected failed")
+			return
+		}
+
+		val, err := listStore.GetValue(treeiter, 0)
+		if err != nil {
+			log.Printf("GetValue failed: %w", err)
+			return
+		}
+
+		certSerial, err = val.GetString()
+		if err != nil {
+			log.Printf("GetString failed: %w", err)
+			return
+		}
+
+		if certSerial != "" {
+			g.certSerial = certSerial
+		}
+	})
+
+	// sign pdf
+	signBtn.Connect("clicked", func() {
+		if g.onFileSign != nil && g.fileName != "" && g.certSerial != "" {
+			go func() {
+				err := g.onFileSign(g.fileName, g.certSerial)
+				fileNameLabel.SetText(fileLabelDefaultText)
+				g.fileName = ""
+				if err != nil {
+					g.ShowMessage(err.Error(), "Error")
+				}
+				g.ShowMessage("File signed", "Signed")
+			}()
 		}
 	})
 
