@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -43,6 +45,18 @@ func (a *api) GetCerts(ctx *gin.Context) {
 }
 
 func (a *api) SignFile(ctx *gin.Context) {
+	if a.cfg.LogRequests {
+		body, _ := io.ReadAll(ctx.Request.Body)
+		ctx.Request.Body = io.NopCloser(bytes.NewReader(body))
+		reqFileName := fmt.Sprintf("irms-request-%s.json", time.Now().Format("2006-01-02-150405"))
+		reqFile, err := os.Create(reqFileName)
+		if err == nil {
+			reqFile.Write(body)
+			reqFile.Close()
+			a.log.Info().Str("FileName", reqFileName).Msg("IRMS request logged")
+		}
+	}
+
 	var req model.FieldSignRequest
 	err := ctx.BindJSON(&req)
 	if err != nil {

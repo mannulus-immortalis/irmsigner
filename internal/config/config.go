@@ -35,9 +35,6 @@ func LoadConfig(filename string) (*model.Config, error) {
 	if cfg.Font == "" {
 		cfg.Font = "./img/LiberationSans-Regular.ttf"
 	}
-	if cfg.FontSize == 0 {
-		cfg.FontSize = 14
-	}
 
 	return &cfg, nil
 }

@@ -1,4 +1,5 @@
 *.sh
 *.pdf
+*.json
 irmsigner
 data

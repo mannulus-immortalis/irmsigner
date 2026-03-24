@@ -2,4 +2,4 @@ listen: ":8984"
 pkcs11_lib: "/usr/lib/opensc-pkcs11.so"
 stamp_background: "./img/stamp_bg.png"
 font: "./img/LiberationSans-Regular.ttf"
-font_size: 14
+log_requests: true
