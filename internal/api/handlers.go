@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -164,7 +165,13 @@ func (a *api) SignFile(ctx *gin.Context) {
 	resp := model.FieldSignResponse{
 		SignedFileStream: &str,
 	}
-	ctx.JSON(http.StatusCreated, resp)
+	// dirty hack: by some mystical reason IRMS expects not a regular JSON response, but a JSON inside a text string (yes, with quotes)
+	respBytes, _ := json.Marshal(resp)
+	respStr := string(respBytes)
+	respStr = `"` + strings.ReplaceAll(respStr, `"`, `\"`) + `"`
+	ctx.Data(http.StatusOK, "application/json", []byte(respStr))
+	// /dirty hack
+	//ctx.JSON(http.StatusOK, resp)
 }
 
 // SignCustomFile signs any PDF file dropped into the app window
