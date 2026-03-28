@@ -13,26 +13,38 @@ Currently it serves two types of requests:
 * List PKCS11 certificates installed on hardware cryptographic device (USB-Token);
 * Sign PDF documents with selected certificate (PAdES standart).
 
-Differences from the original software:
-
-* Open-source
-* Runs in Linux
-* Displays certificate list
-* Saves local copy of signed document
-
 ## Requirements
 
 * PKCS11 hardware token (tested with `SafeNet eToken 5100`, issued by `Pošta CG`)
-* Browser should have permission to access local network (it sends requests to the local port 8984)
+* PKCS11 driver: `opensc` library, `SafeNet Authentication Client` or `SafeNet Minidriver`, or something else. Tested with `opensc`.
+* Browser should have permission to access local network (it sends requests to the local port `8984`)
+
+## Installation
+
+1. Copy all files from repository to any place you want.
+2. Install PKCS11 software
+3. Find pkcs11 library path: usually they are installed into `/usr/local/pkcs11/` directory. For example `/usr/lib/opensc-pkcs11.so`
+4. Update your `config.yml` file: set0 `pkcs11_lib` parameter and check other paths - all mentioned files should present.
 
 ## Usage
 
-Just run the app, it will start in minimized state just to give you a possibility to view certificate list and close app when you don't need it anymore.
+Run the app.
 
-Insert your token and you'll see the list of certificates installed in it. Only CC certificates, usable for signing, are shown.
+Insert your token and you'll see the list of certificates installed in it. Only "Content Commitment / Non Repudiation" certificates, usable for signing, are shown.
 
-When browser with open IRMS portal sends a document sign request, you will be asked to enter the token password. 
-Application will not count unsuccessfull attempts, so it's up to you.
+### Signing any PDF document
+
+IRMS portal requires you to sign each PDF file you upload there.
+
+Select certificate from the list (just click it and it will be highlighted).
+
+Drag-and-drop your PDF file into application window - it's name will be shown under certificates list and "Sign file" button will be enabled.
+
+Press "Sign button" and enter your token password. Signed file will be named as original with added suffix `.signed.YYYY-MM-DD-hhmmss`.
+
+### Working with IRMS portal
+
+When browser with open IRMS portal sends a document sign request, you will be asked to enter the token password.
 
 ## Config
 
@@ -45,7 +57,7 @@ listen:           ":8984"                            # port to listen, no need t
 pkcs11_lib:       "/usr/lib/opensc-pkcs11.so"        # pkcs11 library name
 stamp_background: "./img/stamp_bg.png"               # background image of stamp placed in signed PDF documents 
 font:             "./img/LiberationSans-Regular.ttf" # font of stamp text 
-font_size:        14                                 # font size of stamp text
+log_requests:     true                               # save incoming requests in *.json files
 ```
 
 ## Building requirements
@@ -53,4 +65,3 @@ font_size:        14                                 # font size of stamp text
 * golang >= 1.25
 * libudev-dev
 * opensc-pkcs11 >= 0.26.1 - critical, earlier versions are bugged and totally unusable
-
