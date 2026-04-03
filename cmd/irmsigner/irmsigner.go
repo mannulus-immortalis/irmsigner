@@ -36,7 +36,7 @@ func main() {
 
 	// GUI
 	guiStopChan := make(chan bool)
-	gui, err := gui.New(cfg, guiStopChan)
+	gui, err := gui.New(&log, cfg, guiStopChan)
 	if err != nil {
 		log.Err(err).Msg("GUI init failed")
 		return

@@ -2,7 +2,7 @@ package gui
 
 import (
 	"encoding/base64"
-	"log"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -10,6 +10,7 @@ import (
 	"github.com/gotk3/gotk3/gdk"
 	"github.com/gotk3/gotk3/glib"
 	"github.com/gotk3/gotk3/gtk"
+	"github.com/rs/zerolog"
 
 	"github.com/mannulus-immortalis/irmsigner/internal/model"
 )
@@ -24,6 +25,7 @@ const (
 )
 
 type gui struct {
+	log        *zerolog.Logger
 	cfg        *model.Config
 	mainWin    *gtk.Window
 	listStore  *gtk.ListStore
@@ -35,7 +37,7 @@ type gui struct {
 	certSerial string
 }
 
-func New(cfg *model.Config, closeChan chan bool) (*gui, error) {
+func New(log *zerolog.Logger, cfg *model.Config, closeChan chan bool) (*gui, error) {
 	iconBytes, _ := base64.StdEncoding.DecodeString(model.AppIcon)
 	icon, err := gdk.PixbufNewFromDataOnly(iconBytes)
 	if err != nil {
@@ -43,6 +45,7 @@ func New(cfg *model.Config, closeChan chan bool) (*gui, error) {
 	}
 
 	g := &gui{
+		log:       log,
 		cfg:       cfg,
 		closeChan: closeChan,
 		icon:      icon,
@@ -261,7 +264,7 @@ You will be asked for a password when IRMS portal requests signature.`)
 	signBtn, _ := gtk.ButtonNewWithLabel("Sign file")
 	signBtn.SetSensitive(false)
 
-	treeView, listStore, err := setupTreeView()
+	treeView, listStore, err := g.setupTreeView()
 	if err != nil {
 		return err
 	}
@@ -300,13 +303,16 @@ You will be asked for a password when IRMS portal requests signature.`)
 
 		fileName := string(data.GetData())
 		fileName = strings.TrimSpace(fileName)
+		fileName, _ = url.QueryUnescape(fileName)
 		fileName = strings.TrimPrefix(fileName, "file://")
 		_, err = os.Stat(fileName)
 
+		g.log.Debug().Str("Filename", fileName).Msg("File dropped in window")
 		if err == nil {
 			g.fileName = fileName
 		} else {
 			g.fileName = ""
+			g.ShowMessage("Can't open file "+fileName, "Error")
 		}
 
 		if g.fileName == "" {
@@ -320,7 +326,7 @@ You will be asked for a password when IRMS portal requests signature.`)
 	// cert select
 	sel, err := treeView.GetSelection()
 	if err != nil {
-		log.Printf("GetSelection failed: %w", err)
+		g.log.Err(err).Msg("GetSelection failed")
 		return err
 	}
 	sel.Connect("changed", func() {
@@ -331,25 +337,25 @@ You will be asked for a password when IRMS portal requests signature.`)
 		certSerial := ""
 
 		if sel.CountSelectedRows() != 1 {
-			// log.Printf("Unexpected selected rows count: %d", sel.CountSelectedRows())
+			// g.log.Error().Int("SelectedRows", sel.CountSelectedRows()).Msg("Unexpected selected rows count")
 			return
 		}
 
 		_, treeiter, ok := sel.GetSelected()
 		if !ok || treeiter == nil {
-			log.Printf("GetSelected failed")
+			g.log.Error().Msg("GetSelected failed")
 			return
 		}
 
 		val, err := listStore.GetValue(treeiter, 0)
 		if err != nil {
-			log.Printf("GetValue failed: %w", err)
+			g.log.Err(err).Msg("GetValue failed")
 			return
 		}
 
 		certSerial, err = val.GetString()
 		if err != nil {
-			log.Printf("GetString failed: %w", err)
+			g.log.Err(err).Msg("GetString failed")
 			return
 		}
 
@@ -367,6 +373,7 @@ You will be asked for a password when IRMS portal requests signature.`)
 				g.fileName = ""
 				if err != nil {
 					g.ShowMessage(err.Error(), "Error")
+					return
 				}
 				g.ShowMessage("File signed", "Signed")
 			}()
@@ -381,31 +388,33 @@ You will be asked for a password when IRMS portal requests signature.`)
 }
 
 // Add a column to the tree view (during the initialization of the tree view)
-func createColumn(title string, id int) *gtk.TreeViewColumn {
+func (g *gui) createColumn(title string, id int) *gtk.TreeViewColumn {
 	cellRenderer, err := gtk.CellRendererTextNew()
 	if err != nil {
-		log.Fatal("Unable to create text cell renderer:", err)
+		g.log.Err(err).Msg("Unable to create text cell renderer")
+		return nil
 	}
 
 	column, err := gtk.TreeViewColumnNewWithAttribute(title, cellRenderer, "text", id)
 	if err != nil {
-		log.Fatal("Unable to create cell column:", err)
+		g.log.Err(err).Msg("Unable to create cell column")
+		return nil
 	}
 
 	return column
 }
 
 // Creates a tree view and the list store that holds its data
-func setupTreeView() (*gtk.TreeView, *gtk.ListStore, error) {
+func (g *gui) setupTreeView() (*gtk.TreeView, *gtk.ListStore, error) {
 	treeView, err := gtk.TreeViewNew()
 	if err != nil {
 		return nil, nil, err
 	}
 
-	treeView.AppendColumn(createColumn("Serial", COLUMN_SERIAL))
-	treeView.AppendColumn(createColumn("Thumbprint", COLUMN_THUMB))
-	treeView.AppendColumn(createColumn("Issued to", COLUMN_SUBJ))
-	treeView.AppendColumn(createColumn("Valid till", COLUMN_TILL))
+	treeView.AppendColumn(g.createColumn("Serial", COLUMN_SERIAL))
+	treeView.AppendColumn(g.createColumn("Thumbprint", COLUMN_THUMB))
+	treeView.AppendColumn(g.createColumn("Issued to", COLUMN_SUBJ))
+	treeView.AppendColumn(g.createColumn("Valid till", COLUMN_TILL))
 
 	// Creating a list store. This is what holds the data that will be shown on our tree view.
 	listStore, err := gtk.ListStoreNew(glib.TYPE_STRING, glib.TYPE_STRING, glib.TYPE_STRING, glib.TYPE_STRING)

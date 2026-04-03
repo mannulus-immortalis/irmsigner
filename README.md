@@ -23,8 +23,8 @@ Currently it serves two types of requests:
 
 1. Copy all files from repository to any place you want.
 2. Install PKCS11 software
-3. Find pkcs11 library path: usually they are installed into `/usr/local/pkcs11/` directory. For example `/usr/lib/opensc-pkcs11.so`
-4. Update your `config.yml` file: set0 `pkcs11_lib` parameter and check other paths - all mentioned files should present.
+3. Find pkcs11 library path: usually they are installed into `/usr/lib/pkcs11/` directory. For example `/usr/lib/pkcs11/opensc-pkcs11.so` or `/usr/lib/pkcs11/libIDPrimePKCS11.so`
+4. Update your `config.yml` file: set `pkcs11_lib` parameter and check other paths - all mentioned files should present.
 
 ## Usage
 
@@ -54,7 +54,7 @@ Config example with default values:
 
 ```yaml
 listen:           ":8984"                            # port to listen, no need to change
-pkcs11_lib:       "/usr/lib/opensc-pkcs11.so"        # pkcs11 library name
+pkcs11_lib:       "/usr/lib/pkcs11/opensc-pkcs11.so" # pkcs11 library name
 stamp_background: "./img/stamp_bg.png"               # background image of stamp placed in signed PDF documents 
 font:             "./img/LiberationSans-Regular.ttf" # font of stamp text 
 log_requests:     true                               # save incoming requests in *.json files

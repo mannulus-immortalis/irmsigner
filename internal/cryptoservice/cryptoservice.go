@@ -218,7 +218,6 @@ func (c *cryptoservice) MakeCustomStamp(text []string) (*model.StampImage, error
 	max := w
 	for _, t := range text {
 		nw, _ := tmpdc.MeasureString(t)
-		fmt.Printf("%s => %0.1f\n", t, nw)
 		if nw > max {
 			max = nw
 		}

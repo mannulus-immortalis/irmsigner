@@ -173,7 +173,7 @@ func (a *api) SignFile(ctx *gin.Context) {
 
 // SignCustomFile signs any PDF file dropped into the app window
 func (a *api) SignCustomFile(inputFilename, certSerial string) error {
-	a.log.Info().Str("Filename", inputFilename).Str("CertSerial", certSerial).Msg("PDF file dropped into the window")
+	a.log.Info().Str("Filename", inputFilename).Str("CertSerial", certSerial).Msg("Signing PDF file")
 
 	// select certificate
 	certs, err := a.crypto.ListHardwareCertificates()
