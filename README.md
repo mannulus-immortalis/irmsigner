@@ -65,3 +65,4 @@ log_requests:     true                               # save incoming requests in
 * golang >= 1.25
 * libudev-dev
 * opensc-pkcs11 >= 0.26.1 - critical, earlier versions are bugged and totally unusable
+* OR SafenetAuthenticationClient >= 10.9

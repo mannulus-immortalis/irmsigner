@@ -10,11 +10,12 @@ import (
 
 	"github.com/ThalesGroup/crypto11"
 	"github.com/digitorus/pdf"
-	"github.com/digitorus/pdfsign/sign"
+	// "github.com/digitorus/pdfsign/sign"
 	"github.com/fogleman/gg"
 	"github.com/miekg/pkcs11"
 
 	"github.com/mannulus-immortalis/irmsigner/internal/model"
+	"github.com/mannulus-immortalis/irmsigner/internal/sign"
 )
 
 const (
