@@ -2,12 +2,23 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 
 	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v3"
 
 	"github.com/mannulus-immortalis/irmsigner/internal/model"
 )
+
+// assetPath resolves a relative asset path against the binary's own directory
+// so the app finds its assets regardless of the working directory.
+func assetPath(rel string) string {
+	exe, err := os.Executable()
+	if err != nil {
+		return rel
+	}
+	return filepath.Join(filepath.Dir(exe), rel)
+}
 
 func LoadConfig(filename string) (*model.Config, error) {
 	l := log.With().Str("File", filename).Logger()
@@ -27,13 +38,13 @@ func LoadConfig(filename string) (*model.Config, error) {
 		cfg.Listen = ":8984"
 	}
 	if cfg.Pkcs11Lib == "" {
-		cfg.Pkcs11Lib = "/usr/lib/opensc-pkcs11.so"
+		cfg.Pkcs11Lib = defaultPkcs11Lib
 	}
 	if cfg.StampBg == "" {
-		cfg.StampBg = "./img/stamp_bg.png"
+		cfg.StampBg = assetPath("img/stamp_bg.png")
 	}
 	if cfg.Font == "" {
-		cfg.Font = "./img/LiberationSans-Regular.ttf"
+		cfg.Font = assetPath("img/LiberationSans-Regular.ttf")
 	}
 
 	return &cfg, nil

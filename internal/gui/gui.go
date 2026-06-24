@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gotk3/gotk3/gdk"
@@ -64,180 +65,213 @@ func (g *gui) OnFileDrop(f model.FileDropFunc) {
 }
 
 func (g *gui) UpdateList(list []*model.Certificate) {
-	g.listStore.Clear()
-	time.Sleep(100 * time.Millisecond)
-	if len(list) == 0 {
-		_ = g.addRow([]interface{}{
-			"",
-			"Please attach your cryptographic device",
-			"",
-			"",
-		})
-		return
-	}
-	for _, c := range list {
-		_ = g.addRow([]interface{}{
-			c.SerialNumber,
-			c.Thumbprint,
-			c.IssuedTo,
-			c.ValidTill.Format(time.DateOnly),
-		})
-	}
+	glib.IdleAdd(func() bool {
+		g.listStore.Clear()
+		if len(list) == 0 {
+			_ = g.addRow([]interface{}{
+				"",
+				"Please attach your cryptographic device",
+				"",
+				"",
+			})
+			return false
+		}
+		for _, c := range list {
+			_ = g.addRow([]interface{}{
+				c.SerialNumber,
+				c.Thumbprint,
+				c.IssuedTo,
+				c.ValidTill.Format(time.DateOnly),
+			})
+		}
+		return false
+	})
 }
 
 func (g *gui) RequestPass(certTitle string) string {
-	passChan := make(chan string)
+	passChan := make(chan string, 1)
 
-	win, err := gtk.WindowNew(gtk.WINDOW_TOPLEVEL)
-	if err != nil {
-		return ""
-	}
-	win.SetIcon(g.icon)
+	glib.IdleAdd(func() bool {
+		win, err := gtk.WindowNew(gtk.WINDOW_TOPLEVEL)
+		if err != nil {
+			close(passChan)
+			return false
+		}
+		win.SetIcon(g.icon)
 
-	label, _ := gtk.LabelNew(`IRMS portal requests your signature.
+		label, _ := gtk.LabelNew(`IRMS portal requests your signature.
 Please enter password for certificate:
 
 ` + certTitle)
-	label.SetHExpand(true)
-	label.SetHAlign(gtk.ALIGN_START)
+		label.SetHExpand(true)
+		label.SetHAlign(gtk.ALIGN_START)
 
-	passwordEntry, _ := gtk.EntryNew()
-	passwordEntry.SetVisibility(false)
-	passwordEntry.SetPlaceholderText("Certificate password")
-	passwordEntry.Connect("activate", func() {
-		password, _ := passwordEntry.GetText()
-		passChan <- password
-		close(passChan)
-		win.Close()
+		passwordEntry, _ := gtk.EntryNew()
+		passwordEntry.SetVisibility(false)
+		passwordEntry.SetPlaceholderText("Certificate password")
+
+		var once sync.Once
+		submit := func() {
+			once.Do(func() {
+				password, _ := passwordEntry.GetText()
+				passChan <- password
+				win.Close()
+			})
+		}
+		cancel := func() {
+			once.Do(func() {
+				close(passChan)
+				win.Close()
+			})
+		}
+
+		passwordEntry.Connect("activate", submit)
+
+		signBtn, _ := gtk.ButtonNewWithLabel("Sign")
+		signBtn.Connect("clicked", submit)
+
+		cancelBtn, _ := gtk.ButtonNewWithLabel("Cancel")
+		cancelBtn.Connect("clicked", cancel)
+
+		img, err := gtk.ImageNewFromPixbuf(g.icon)
+		if err != nil {
+			close(passChan)
+			return false
+		}
+
+		grid, _ := gtk.GridNew()
+		grid.SetBorderWidth(10)
+		grid.SetColumnSpacing(10)
+		grid.SetRowSpacing(10)
+		grid.SetHExpand(true)
+		grid.SetVExpand(true)
+		grid.SetOrientation(gtk.ORIENTATION_VERTICAL)
+		grid.Attach(img, 0, 0, 1, 3)
+		grid.Attach(label, 1, 0, 2, 1)
+		grid.Attach(passwordEntry, 1, 1, 2, 1)
+		grid.Attach(signBtn, 1, 2, 1, 1)
+		grid.Attach(cancelBtn, 2, 2, 1, 1)
+
+		win.Add(grid)
+		win.SetTransientFor(g.mainWin)
+		win.SetModal(true)
+		win.SetDefaultSize(250, 100)
+		win.SetTitle("IRMSigner password")
+		win.ShowAll()
+		win.Present()
+		passwordEntry.GrabFocus()
+		return false
 	})
-	signBtn, _ := gtk.ButtonNewWithLabel("Sign")
-	signBtn.Connect("clicked", func() {
-		password, _ := passwordEntry.GetText()
-		passChan <- password
-		close(passChan)
-		win.Close()
-	})
-
-	cancelBtn, _ := gtk.ButtonNewWithLabel("Cancel")
-	cancelBtn.Connect("clicked", func() {
-		close(passChan)
-		win.Close()
-	})
-
-	img, err := gtk.ImageNewFromPixbuf(g.icon)
-	if err != nil {
-		return ""
-	}
-
-	grid, _ := gtk.GridNew()
-	grid.SetBorderWidth(10)
-	grid.SetColumnSpacing(10)
-	grid.SetRowSpacing(10)
-	grid.SetHExpand(true)
-	grid.SetVExpand(true)
-	grid.SetOrientation(gtk.ORIENTATION_VERTICAL)
-	grid.Attach(img, 0, 0, 1, 3)
-	grid.Attach(label, 1, 0, 2, 1)
-	grid.Attach(passwordEntry, 1, 1, 2, 1)
-	grid.Attach(signBtn, 1, 2, 1, 1)
-	grid.Attach(cancelBtn, 2, 2, 1, 1)
-
-	win.Add(grid)
-
-	win.SetModal(true)
-	win.SetDefaultSize(250, 100)
-	win.SetTitle("IRMSigner password")
-	win.ShowAll()
 
 	return <-passChan
 }
 
 func (g *gui) StartSpinner() (func(), error) {
-	win, err := gtk.WindowNew(gtk.WINDOW_TOPLEVEL)
-	if err != nil {
-		return nil, err
+	type result struct {
+		stop func()
+		err  error
 	}
-	win.SetIcon(g.icon)
+	resultChan := make(chan result, 1)
 
-	label, _ := gtk.LabelNew(`Signing document...`)
-	label.SetHExpand(true)
-	label.SetHAlign(gtk.ALIGN_CENTER)
+	glib.IdleAdd(func() bool {
+		win, err := gtk.WindowNew(gtk.WINDOW_TOPLEVEL)
+		if err != nil {
+			resultChan <- result{nil, err}
+			return false
+		}
+		win.SetIcon(g.icon)
 
-	spinner, _ := gtk.SpinnerNew()
+		label, _ := gtk.LabelNew(`Signing document...`)
+		label.SetHExpand(true)
+		label.SetHAlign(gtk.ALIGN_CENTER)
 
-	img, err := gtk.ImageNewFromPixbuf(g.icon)
-	if err != nil {
-		return nil, err
-	}
-	grid, _ := gtk.GridNew()
-	grid.SetBorderWidth(10)
-	grid.SetColumnSpacing(10)
-	grid.SetRowSpacing(10)
-	grid.SetHExpand(true)
-	grid.SetVExpand(true)
-	grid.SetOrientation(gtk.ORIENTATION_VERTICAL)
-	grid.Attach(img, 0, 0, 1, 2)
-	grid.Attach(label, 1, 0, 1, 1)
-	grid.Attach(spinner, 1, 1, 1, 1)
+		spinner, _ := gtk.SpinnerNew()
 
-	win.Add(grid)
+		img, err := gtk.ImageNewFromPixbuf(g.icon)
+		if err != nil {
+			resultChan <- result{nil, err}
+			return false
+		}
+		grid, _ := gtk.GridNew()
+		grid.SetBorderWidth(10)
+		grid.SetColumnSpacing(10)
+		grid.SetRowSpacing(10)
+		grid.SetHExpand(true)
+		grid.SetVExpand(true)
+		grid.SetOrientation(gtk.ORIENTATION_VERTICAL)
+		grid.Attach(img, 0, 0, 1, 2)
+		grid.Attach(label, 1, 0, 1, 1)
+		grid.Attach(spinner, 1, 1, 1, 1)
 
-	win.SetModal(true)
-	win.SetDefaultSize(250, 100)
-	win.SetTitle("IRMSigner Wait...")
-	win.ShowAll()
+		win.Add(grid)
+		win.SetModal(true)
+		win.SetDefaultSize(250, 100)
+		win.SetTitle("IRMSigner Wait...")
+		win.ShowAll()
+		spinner.Start()
 
-	spinner.Start()
+		resultChan <- result{func() {
+			glib.IdleAdd(func() bool {
+				spinner.Stop()
+				win.Close()
+				return false
+			})
+		}, nil}
+		return false
+	})
 
-	return func() {
-		spinner.Stop()
-		win.Close()
-	}, nil
+	r := <-resultChan
+	return r.stop, r.err
 }
 
 func (g *gui) ShowMessage(text, status string) error {
-	win, err := gtk.WindowNew(gtk.WINDOW_TOPLEVEL)
-	if err != nil {
-		return err
-	}
-	win.SetIcon(g.icon)
+	glib.IdleAdd(func() bool {
+		win, err := gtk.WindowNew(gtk.WINDOW_TOPLEVEL)
+		if err != nil {
+			return false
+		}
+		win.SetIcon(g.icon)
 
-	label, _ := gtk.LabelNew(text)
-	label.SetHExpand(true)
-	label.SetHAlign(gtk.ALIGN_START)
+		label, _ := gtk.LabelNew(text)
+		label.SetHExpand(true)
+		label.SetHAlign(gtk.ALIGN_START)
 
-	closeBtn, _ := gtk.ButtonNewWithLabel("OK")
-	closeBtn.Connect("clicked", func() {
-		win.Close()
+		closeBtn, _ := gtk.ButtonNewWithLabel("OK")
+		closeBtn.Connect("clicked", func() {
+			win.Close()
+		})
+
+		img, err := gtk.ImageNewFromPixbuf(g.icon)
+		if err != nil {
+			return false
+		}
+		grid, _ := gtk.GridNew()
+		grid.SetBorderWidth(10)
+		grid.SetColumnSpacing(10)
+		grid.SetRowSpacing(10)
+		grid.SetHExpand(true)
+		grid.SetVExpand(true)
+		grid.SetOrientation(gtk.ORIENTATION_VERTICAL)
+		grid.Attach(img, 0, 0, 1, 2)
+		grid.Attach(label, 1, 0, 1, 1)
+		grid.Attach(closeBtn, 1, 1, 1, 1)
+
+		win.Add(grid)
+		win.SetModal(true)
+		win.SetDefaultSize(250, 100)
+		win.SetTitle("IRMSigner " + status)
+		win.ShowAll()
+		return false
 	})
-
-	img, err := gtk.ImageNewFromPixbuf(g.icon)
-	if err != nil {
-		return err
-	}
-	grid, _ := gtk.GridNew()
-	grid.SetBorderWidth(10)
-	grid.SetColumnSpacing(10)
-	grid.SetRowSpacing(10)
-	grid.SetHExpand(true)
-	grid.SetVExpand(true)
-	grid.SetOrientation(gtk.ORIENTATION_VERTICAL)
-	grid.Attach(img, 0, 0, 1, 2)
-	grid.Attach(label, 1, 0, 1, 1)
-	grid.Attach(closeBtn, 1, 1, 1, 1)
-
-	win.Add(grid)
-
-	win.SetModal(true)
-	win.SetDefaultSize(250, 100)
-	win.SetTitle("IRMSigner " + status)
-	win.ShowAll()
-
 	return nil
 }
 
 func (g *gui) Stop() {
 	gtk.MainQuit()
+}
+
+func (g *gui) Run() {
+	gtk.Main()
 }
 
 func (g *gui) start() error {
@@ -369,8 +403,11 @@ You will be asked for a password when IRMS portal requests signature.`)
 		if g.onFileSign != nil && g.fileName != "" && g.certSerial != "" {
 			go func() {
 				err := g.onFileSign(g.fileName, g.certSerial)
-				fileNameLabel.SetText(fileLabelDefaultText)
 				g.fileName = ""
+				glib.IdleAdd(func() bool {
+					fileNameLabel.SetText(fileLabelDefaultText)
+					return false
+				})
 				if err != nil {
 					g.ShowMessage(err.Error(), "Error")
 					return
@@ -382,8 +419,6 @@ You will be asked for a password when IRMS portal requests signature.`)
 
 	win.Add(grid)
 	win.ShowAll()
-	// win.Iconify()
-	go gtk.Main()
 	return nil
 }
 

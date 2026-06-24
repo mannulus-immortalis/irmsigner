@@ -4,12 +4,10 @@ import (
 	"context"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
-	"github.com/rubiojr/go-usbmon"
 
 	"github.com/mannulus-immortalis/irmsigner/internal/model"
 )
@@ -68,24 +66,6 @@ func (a *api) setupRoutes() {
 
 	a.r.GET("/api/certificates", a.GetCerts)
 	a.r.POST("/api/fieldSign", a.SignFile)
-}
-
-// update certificate list when usb devices are inserted or removed
-func (a *api) listenUSBEvents() {
-	usbEvents, err := usbmon.Listen(a.ctx)
-	if err != nil {
-		a.log.Err(err).Msg("USB events listen failed")
-		return
-	}
-	go func() {
-		for e := range usbEvents {
-			act := e.Action()
-			if act == "bind" || act == "remove" {
-				time.Sleep(100 * time.Millisecond) // wait for device init
-				_, _ = a.updateCertList()
-			}
-		}
-	}()
 }
 
 // request cert list and show it in UI
