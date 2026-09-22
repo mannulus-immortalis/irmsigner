@@ -9,6 +9,7 @@ type GUI interface {
 	StartSpinner() (func(), error)
 	ShowMessage(text, status string) error
 	Stop()
+	Run()
 }
 
 const AppIcon = `iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAAgAElEQVR42u2debAlV33fP7/Tfe/b

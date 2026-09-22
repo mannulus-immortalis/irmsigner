@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 
 	_ "github.com/joho/godotenv/autoload"
@@ -14,6 +15,11 @@ import (
 	"github.com/mannulus-immortalis/irmsigner/internal/gui"
 	"github.com/mannulus-immortalis/irmsigner/internal/model"
 )
+
+func init() {
+	// macOS requires all UI (Cocoa/NSWindow) calls on the main OS thread.
+	runtime.LockOSThread()
+}
 
 func main() {
 	var err error
@@ -53,20 +59,25 @@ func main() {
 
 	log.Info().Str("Port", cfg.Listen).Msg("Listening...")
 
-	// listen to OS signals
+	// Handle OS signals and lifecycle events in a background goroutine so
+	// the main goroutine (pinned to the main OS thread) can run the GTK loop.
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-	select {
-	case <-guiStopChan:
-		log.Info().Msg("gui closed")
-		api.Close()
-	case err = <-serverErrors:
-		log.Err(err).Msg("received server error")
-		gui.Stop()
-	case <-sig:
-		log.Info().Msg("received shutdown signal")
-		gui.Stop()
-		api.Close()
-	}
+	go func() {
+		select {
+		case <-guiStopChan:
+			log.Info().Msg("gui closed")
+			api.Close()
+		case err = <-serverErrors:
+			log.Err(err).Msg("received server error")
+			gui.Stop()
+		case <-sig:
+			log.Info().Msg("received shutdown signal")
+			gui.Stop()
+			api.Close()
+		}
+	}()
 
+	// Run the GTK event loop on the main OS thread (required by macOS).
+	gui.Run()
 }

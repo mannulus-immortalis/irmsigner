@@ -33,6 +33,9 @@ func New(cfg *model.Config) (*cryptoservice, error) {
 // ListHardwareCertificates lists all available certificates
 func (c *cryptoservice) ListHardwareCertificates() ([]*model.Certificate, error) {
 	p := pkcs11.New(c.cfg.Pkcs11Lib)
+	if p == nil {
+		return nil, fmt.Errorf("failed to load PKCS11 library: %s", c.cfg.Pkcs11Lib)
+	}
 	err := p.Initialize()
 	if err != nil {
 		return nil, err
