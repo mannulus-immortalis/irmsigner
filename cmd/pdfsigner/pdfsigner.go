@@ -130,12 +130,15 @@ func main() {
 		return
 	}
 
+	// Get default stamp position
+	stampX, stampY := crypto.GetDefaultStampPos()
+
 	// prepare stamp image
 	stamp, err := crypto.MakeCustomStamp([]string{
 		"Digitally signed by",
 		cert.IssuedTo,
 		time.Now().Format("2006-01-02 15:04:05Z07:00"),
-	})
+	}, stampX, stampY)
 	if err != nil {
 		log.Error().Msg("MakeCustomStamp failed")
 		return

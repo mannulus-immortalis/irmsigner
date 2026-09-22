@@ -246,12 +246,15 @@ func (a *api) SignCustomFile(inputFilename, certSerial string) error {
 		}
 	}()
 
+	// Get default stamp position
+	stampX, stampY := a.crypto.GetDefaultStampPos()
+
 	// prepare stamp image
 	stamp, err := a.crypto.MakeCustomStamp([]string{
 		"Digitally signed by",
 		cert.IssuedTo,
 		time.Now().Format("2006-01-02 15:04:05Z07:00"),
-	})
+	}, stampX, stampY)
 	if err != nil {
 		a.log.Error().Msg("MakeCustomStamp failed")
 		return err

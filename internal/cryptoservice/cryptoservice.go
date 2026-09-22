@@ -210,8 +210,11 @@ func (c *cryptoservice) MakeIRMSStamp(text []string, x, y float64) (*model.Stamp
 	return c.makeStamp(dc, text, x, y, 85, 62, 18, 14)
 }
 
-func (c *cryptoservice) MakeCustomStamp(text []string) (*model.StampImage, error) {
-	x, y := 350.0, 50.0
+func (c *cryptoservice) GetDefaultStampPos() (x, y float64) {
+	return 350.0, 50.0
+}
+
+func (c *cryptoservice) MakeCustomStamp(text []string, x, y float64) (*model.StampImage, error) {
 	w, h := 370.0, 110.0
 	lineStep, fontSize := 32.0, 28.0
 
