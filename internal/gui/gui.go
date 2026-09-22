@@ -211,7 +211,7 @@ func (g *gui) StartSpinner() (func(), error) {
 		spinner.Start()
 
 		resultChan <- result{func() {
-			glib.IdleAdd(func() bool {
+			glib.IdleAddPriority(glib.PRIORITY_HIGH, func() bool {
 				spinner.Stop()
 				win.Close()
 				return false
