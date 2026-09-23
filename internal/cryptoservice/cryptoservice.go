@@ -214,6 +214,39 @@ func (c *cryptoservice) GetDefaultStampPos() (x, y float64) {
 	return 350.0, 50.0
 }
 
+func (c *cryptoservice) GetPageSize(data []byte, pageNum int) (x, y float64, err error) {
+	if pageNum == 0 {
+		pageNum = 1
+	}
+	bytesReader := bytes.NewReader(data)
+	pdfReader, err := pdf.NewReader(bytesReader, int64(len(data)))
+	if err != nil {
+		return 0, 0, err
+	}
+	numPages := pdfReader.NumPage()
+	if numPages == 0 {
+		return 0, 0, nil
+	}
+	if numPages < pageNum {
+		pageNum = 1
+	}
+	page := pdfReader.Page(pageNum)
+	var mb pdf.Value
+	for v := page.V; !v.IsNull(); v = v.Key("Parent") {
+		if r := v.Key("MediaBox"); !r.IsNull() {
+			mb = r
+			break
+		}
+	}
+	if mb.Len() != 4 {
+		return 0, 0, nil
+	}
+	width := mb.Index(2).Float64() - mb.Index(0).Float64()
+	height := mb.Index(3).Float64() - mb.Index(1).Float64()
+
+	return width, height, nil
+}
+
 func (c *cryptoservice) MakeCustomStamp(text []string, x, y float64) (*model.StampImage, error) {
 	w, h := 370.0, 110.0
 	lineStep, fontSize := 32.0, 28.0

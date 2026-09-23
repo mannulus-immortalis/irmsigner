@@ -260,6 +260,21 @@ func (a *api) SignCustomFile(inputFilename, certSerial string) error {
 		return err
 	}
 
+	// Get first page size from pdf
+	pageW, pageH, _ := a.crypto.GetPageSize(data, 1)
+
+	// Fit stamp into page
+	if stamp.UpperRightX >= pageW {
+		d := stamp.UpperRightX - pageW + 10
+		stamp.LowerLeftX -= d
+		stamp.UpperRightX -= d
+	}
+	if stamp.UpperRightY >= pageH {
+		d := stamp.UpperRightY - pageH + 10
+		stamp.LowerLeftY -= d
+		stamp.UpperRightY -= d
+	}
+
 	signInfo := &model.SignatureInfo{
 		Name: cert.IssuedTo,
 	}
